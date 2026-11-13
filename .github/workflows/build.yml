@@ -1,0 +1,70 @@
+name: Build Retro50 APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Criar projeto Android original
+        shell: bash
+        run: |
+          mkdir -p app/src/main/java/br/com/retro50
+          cat > settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = 'Retro50'
+          include ':app'
+          EOF
+          cat > build.gradle <<'EOF'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          EOF
+          cat > app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          android { namespace 'br.com.retro50'; compileSdk 35
+            defaultConfig { applicationId 'br.com.retro50'; minSdk 23; targetSdk 28; versionCode 1; versionName '0.1' }
+          }
+          EOF
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:label="Retro50" android:theme="@android:style/Theme.Material.NoActionBar"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
+          EOF
+          cat > app/src/main/java/br/com/retro50/MainActivity.java <<'EOF'
+          package br.com.retro50;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.graphics.Color;
+          import android.view.ViewGroup;
+          import android.widget.*;
+          public class MainActivity extends Activity {
+            private final String[] consoles = {"Atari 2600", "Atari 5200", "Atari 7800", "Atari Lynx", "Atari Jaguar", "Atari Jaguar CD", "Nintendo NES", "Super Nintendo", "Nintendo 64", "Nintendo GameCube", "Nintendo Wii", "Nintendo Wii U", "Game Boy", "Game Boy Color", "Game Boy Advance", "Nintendo DS", "Nintendo 3DS", "Virtual Boy", "Sega Master System", "Sega Mega Drive", "Sega CD", "Sega 32X", "Sega Saturn", "Sega Dreamcast", "Sega Game Gear", "Sega SG-1000", "Sega Pico", "Sega Mark III", "PC Engine", "PC Engine CD", "SuperGrafx", "PC-FX", "Neo Geo AES", "Neo Geo CD", "Neo Geo Pocket", "Neo Geo Pocket Color", "WonderSwan", "WonderSwan Color", "ColecoVision", "Intellivision", "Magnavox Odyssey 2", "Vectrex", "3DO", "Philips CD-i", "Amiga CD32", "Amiga CDTV", "Fairchild Channel F", "Arcadia 2001", "Commodore 64 Games System", "TurboExpress"};
+            @Override public void onCreate(Bundle state) { super.onCreate(state);
+              LinearLayout root = new LinearLayout(this); root.setOrientation(1); root.setPadding(24,24,24,24); root.setBackgroundColor(Color.rgb(15,20,35));
+              TextView title = new TextView(this); title.setText("RETRO 50"); title.setTextSize(27); title.setTextColor(Color.WHITE); root.addView(title);
+              TextView info = new TextView(this); info.setText("Catálogo de 50 consoles • sem ROMs\nEste app não emula nem abre jogos."); info.setTextColor(0xffb9cbe4); info.setTextSize(15); info.setPadding(0,12,0,18); root.addView(info);
+              EditText search = new EditText(this); search.setSingleLine(); search.setHint("Buscar console"); search.setTextColor(Color.WHITE); search.setHintTextColor(0xffa4b5ca); root.addView(search);
+              ListView list = new ListView(this); ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, consoles); list.setAdapter(adapter); root.addView(list, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1));
+              search.addTextChangedListener(new android.text.TextWatcher(){ public void beforeTextChanged(CharSequence s,int st,int c,int a){} public void onTextChanged(CharSequence s,int st,int before,int count){ adapter.getFilter().filter(s); } public void afterTextChanged(android.text.Editable e){} });
+              list.setOnItemClickListener((p,v,pos,id)->new android.app.AlertDialog.Builder(this).setTitle(adapter.getItem(pos)).setMessage("Catálogo apenas. Nenhum emulador ou jogo está incluído neste aplicativo.").setPositiveButton("OK", null).show());
+              setContentView(root);
+            }
+          }
+          EOF
+      - name: Compilar APK
+        run: gradle --no-daemon assembleDebug
+      - name: Publicar APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Retro50-debug.apk
+          gh release create catalogo-v1 Retro50-debug.apk --title 'Retro50 Catálogo v1' --notes 'Catálogo original de 50 consoles sem PS1. Não contém ROMs nem emuladores. Não executa jogos.'
