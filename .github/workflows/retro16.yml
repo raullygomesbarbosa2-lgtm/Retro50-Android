@@ -1,0 +1,34 @@
+name: Compilar Retro16
+on:
+  push:
+    paths: ['.github/workflows/retro16.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Criar projeto
+        run: |
+          sed -n '75,123p' .github/workflows/build.yml | sed 's/^          //' > /tmp/create-project.sh
+          bash /tmp/create-project.sh
+          sed -i 's/"Nintendo NES", //; s/"Nintendo 64", //; s/"Nintendo DS", //; s/"Nintendo 3DS", //; s/"Game Boy", //; s/"Game Boy Color", //; s/"Game Boy Advance", //; s/RETRO 23/RETRO 16/' app/src/main/java/br/com/retro50/MainActivity.java
+          sed -i "s/versionCode 2; versionName '0.2'/versionCode 4; versionName '0.4'/" app/build.gradle
+          grep 'private final String\[\] consoles' app/src/main/java/br/com/retro50/MainActivity.java
+      - name: Compilar APK
+        run: gradle --no-daemon assembleDebug
+      - name: Publicar APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Retro16-debug.apk
+          gh release create catalogo-v4 Retro16-debug.apk --title 'Retro16: somente Super Nintendo' --notes 'Catálogo com 16 sistemas, com Super Nintendo como único console Nintendo. Sem ROMs e sem emuladores: abrir jogos requer outro aplicativo compatível.'
