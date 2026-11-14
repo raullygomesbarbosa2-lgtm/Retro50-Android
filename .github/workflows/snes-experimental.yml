@@ -1,0 +1,125 @@
+name: SNES experimental
+on:
+  push:
+    paths: ['.github/workflows/snes-experimental.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Criar projeto Android
+        run: |
+          mkdir -p app/src/main/java/br/com/retro16/snes app/src/main/assets
+          cat > settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name='RetroSNES'
+          include ':app'
+          EOF
+          cat > build.gradle <<'EOF'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          EOF
+          cat > app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          android { namespace 'br.com.retro16.snes'; compileSdk 35
+            defaultConfig { applicationId 'br.com.retro16.snesexperimental'; minSdk 23; targetSdk 28; versionCode 1; versionName '0.1-experimental' }
+          }
+          EOF
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:label="Retro SNES experimental" android:theme="@android:style/Theme.Material.NoActionBar"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
+          EOF
+          cat > app/src/main/java/br/com/retro16/snes/MainActivity.java <<'EOF'
+          package br.com.retro16.snes;
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.content.ActivityNotFoundException;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.Toast;
+          public class MainActivity extends Activity {
+            WebView web;
+            ValueCallback<Uri[]> picker;
+            public void onCreate(Bundle b) {
+              super.onCreate(b);
+              web = new WebView(this);
+              web.getSettings().setJavaScriptEnabled(true);
+              web.getSettings().setDomStorageEnabled(true);
+              web.getSettings().setMediaPlaybackRequiresUserGesture(false);
+              web.setWebViewClient(new WebViewClient());
+              web.setWebChromeClient(new WebChromeClient() {
+                @Override public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams params) {
+                  if (picker != null) picker.onReceiveValue(null);
+                  picker = cb;
+                  Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                  i.addCategory(Intent.CATEGORY_OPENABLE);
+                  i.setType("*/*");
+                  try { startActivityForResult(i, 37); return true; }
+                  catch (ActivityNotFoundException e) { picker.onReceiveValue(null); picker=null; Toast.makeText(MainActivity.this,"Seletor de arquivos indisponível",Toast.LENGTH_LONG).show(); return true; }
+                }
+              });
+              setContentView(web);
+              web.loadUrl("file:///android_asset/index.html");
+            }
+            @Override protected void onActivityResult(int request, int result, Intent data) {
+              super.onActivityResult(request,result,data);
+              if(request==37 && picker!=null) {
+                Uri u = data!=null ? data.getData() : null;
+                picker.onReceiveValue(result==RESULT_OK && u!=null ? new Uri[]{u} : null);
+                picker=null;
+              }
+            }
+            @Override public void onBackPressed() { if(web.canGoBack()) web.goBack(); else super.onBackPressed(); }
+          }
+          EOF
+      - name: Baixar núcleo SNES e adaptar interface
+        run: |
+          curl -fL --retry 3 https://github.com/angelo-wf/SnesJs/archive/b904fdb63be15dc0470b69091622ba5b1bde7275.zip -o /tmp/snes.zip
+          unzip -q /tmp/snes.zip -d /tmp/snes-src
+          cp -a /tmp/snes-src/SnesJs-*/* app/src/main/assets/
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/assets/index.html')
+          s=p.read_text()
+          s=s.replace('<head>', '<head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">')
+          s=s.replace('<input id="rom" type="file">', '<h3>Retro SNES experimental</h3><p>Escolha uma ROM .sfc ou .smc do seu aparelho:</p><input id="rom" type="file" accept=".sfc,.smc,.zip">')
+          s=s.replace('<input id="ishirom" type="checkbox"> HiROM', '<input id="ishirom" type="checkbox"> HiROM (experimental)')
+          insert='''<div id="touch"><div><button data-n="10">L</button><button data-n="4">▲</button><button data-n="11">R</button></div><div><button data-n="6">◀</button><button data-n="5">▼</button><button data-n="7">▶</button></div><div><button data-n="1">Y</button><button data-n="9">X</button><button data-n="0">B</button><button data-n="8">A</button></div><div><button data-n="2">SELECT</button><button data-n="3">START</button></div></div><p>Núcleo SnesJs por angelo_wf (MIT). Experimental; LoROM, sem garantia de desempenho ou compatibilidade. Licença incluída no app.</p><script>document.querySelectorAll('[data-n]').forEach(function(b){var n=+b.dataset.n; b.addEventListener('pointerdown',function(e){e.preventDefault();b.setPointerCapture(e.pointerId);audioHandler.resume();snes.setPad1ButtonPressed(n)});function up(e){e.preventDefault();snes.setPad1ButtonReleased(n)}b.addEventListener('pointerup',up);b.addEventListener('pointercancel',up)});document.getElementById('rom').addEventListener('click',function(){audioHandler.resume()});</script><style>body{font-family:sans-serif;background:#101726;color:white;margin:8px}#output{width:min(100%,512px);height:auto}#log{width:auto;max-height:70px;min-height:0;font-size:10px}button{padding:10px 14px;margin:3px;touch-action:none}#touch{touch-action:none}p{font-size:13px}</style>'''
+          s=s.replace('</body>',insert+'</body>')
+          p.write_text(s)
+          PY
+      - name: Testar núcleo com ROM sintética sem jogos
+        run: |
+          cat > /tmp/test-snes.js <<'EOF'
+          const fs=require('fs'), vm=require('vm');
+          const dir='app/src/main/assets/';
+          global.log=()=>{};global.clearArray=(a)=>a.fill(0);global.getWordRep=(v)=>v.toString(16);global.getLongRep=(v)=>v.toString(16);
+          for(const f of ['cart','dsp','spc','apu','pipu','cpu','snes']) vm.runInThisContext(fs.readFileSync(dir+'snes/'+f+'.js','utf8'));
+          const rom=new Uint8Array(0x8000);rom.fill(0xea);rom[0]=0x80;rom[1]=0xfe;
+          for(let i=0;i<21;i++)rom[0x7fc0+i]=32;
+          rom[0x7fd5]=0x20;rom[0x7fd6]=0;rom[0x7fd7]=5;rom[0x7fd8]=0;
+          rom[0x7ffc]=0;rom[0x7ffd]=0x80;
+          const s=new Snes();if(!s.loadRom(rom,false))throw Error('ROM sintética rejeitada');s.reset(true);s.runFrame(false);let pixels=new Uint8ClampedArray(512*480*4);s.setPixels(pixels);console.log('ROM sintética processada; pixels:',pixels.length);
+          EOF
+          timeout 90 node /tmp/test-snes.js
+      - name: Compilar APK
+        run: gradle --no-daemon assembleDebug
+      - name: Publicar versão experimental
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Retro-SNES-experimental.apk
+          gh release create snes-experimental-v1 Retro-SNES-experimental.apk --prerelease --title 'Retro SNES experimental' --notes 'Versão experimental para SNES apenas, sem ROMs. Usa SnesJs por angelo_wf (MIT), não é um núcleo original. Sem teste em celular ou com jogo comercial. Núcleo antigo, apenas LoROM, pode ter lentidão e falhas; HiROM é experimental. Licença incluída no APK. O seletor escolhe arquivo local, sem abrir outro emulador.'
